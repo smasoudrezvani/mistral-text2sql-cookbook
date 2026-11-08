@@ -1,0 +1,13 @@
+{
+ "run": "full_schema_mistral-small-2603_dev50",
+ "approach": "full_schema",
+ "model": "mistral-small-2603",
+ "slice": "dev50",
+ "n": 50,
+ "ex_bird": 0.2,
+ "ex_strict": 0.2,
+ "failed_to_run": 3,
+ "prompt_tokens": 117060,
+ "completion_tokens": 7972,
+ "cost_usd": 0.0223
+}
