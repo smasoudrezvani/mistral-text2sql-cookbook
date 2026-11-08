@@ -17,6 +17,9 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import sqlglot
+from sqlglot import exp
+
 if TYPE_CHECKING:
     from mistralai.client import Mistral
 
@@ -145,25 +148,33 @@ def select_tables(
     return top + extra
 
 
-_IDENT = re.compile(r'`([^`]+)`|"([^"]+)"|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_]*)')
+_FROM_JOIN = re.compile(
+    r'\b(?:FROM|JOIN)\s+(?:`([^`]+)`|"([^"]+)"|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_]*))',
+    re.IGNORECASE,
+)
 
 
 def tables_in_sql(sql: str, table_names: list[str]) -> set[str]:
-    """Find which known tables a SQL query mentions.
+    """Find which known tables a SQL query reads from.
 
-    Matches identifiers (bare, quoted, backticked or bracketed) against the table names,
-    ignoring case. String literals are removed first.
+    Uses the sqlglot parser, so keywords (``ORDER BY``), column names and CTE names are not
+    mistaken for tables. If the SQL can't be parsed, falls back to names right after FROM/JOIN.
 
     Args:
         sql: A SQL query.
         table_names: All tables in the database.
 
     Returns:
-        Table names that appear in the query.
+        Table names (as spelled in table_names) that the query reads from.
     """
-    no_strings = re.sub(r"'(?:[^']|'')*'", "''", sql)
-    idents = {next(g for g in m.groups() if g).lower() for m in _IDENT.finditer(no_strings)}
-    return {t for t in table_names if t.lower() in idents}
+    by_lower = {t.lower(): t for t in table_names}
+    try:
+        tree = sqlglot.parse_one(sql, read="sqlite")
+        ctes = {c.alias_or_name.lower() for c in tree.find_all(exp.CTE)}
+        found = {t.name.lower() for t in tree.find_all(exp.Table)} - ctes
+    except Exception:  # unparseable model output: be conservative
+        found = {next(g for g in m.groups() if g).lower() for m in _FROM_JOIN.finditer(sql or "")}
+    return {by_lower[n] for n in found if n in by_lower}
 
 
 def embed(

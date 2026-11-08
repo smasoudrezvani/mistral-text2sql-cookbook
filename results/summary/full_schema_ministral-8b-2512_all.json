@@ -1,0 +1,13 @@
+{
+ "run": "full_schema_ministral-8b-2512_all",
+ "approach": "full_schema",
+ "model": "ministral-8b-2512",
+ "slice": "all",
+ "n": 500,
+ "ex_bird": 0.106,
+ "ex_strict": 0.1,
+ "failed_to_run": 117,
+ "prompt_tokens": 1215397,
+ "completion_tokens": 71127,
+ "cost_usd": 0.193
+}

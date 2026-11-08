@@ -1,0 +1,14 @@
+{
+ "run": "full_schema_mistral-large-4_sub200_distract",
+ "approach": "full_schema",
+ "model": "mistral-large-4",
+ "slice": "sub200",
+ "n": 200,
+ "ex_bird": 0.56,
+ "ex_strict": 0.53,
+ "failed_to_run": 4,
+ "prompt_tokens": 2438543,
+ "completion_tokens": 657541,
+ "cost_usd": 3.0878,
+ "used_distractor": 0
+}

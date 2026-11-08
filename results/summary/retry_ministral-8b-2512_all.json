@@ -1,0 +1,19 @@
+{
+ "run": "retry_ministral-8b-2512_all",
+ "approach": "retry",
+ "model": "ministral-8b-2512",
+ "slice": "all",
+ "n": 500,
+ "ex_bird": 0.14,
+ "ex_strict": 0.128,
+ "failed_to_run": 24,
+ "prompt_tokens": 1909425,
+ "completion_tokens": 124478,
+ "cost_usd": 0.3051,
+ "first_try_ex_bird": 0.102,
+ "first_try_failed_to_run": 112,
+ "avg_attempts": 1.5,
+ "retried": 159,
+ "fixed_by_retry": 19,
+ "broken_by_retry": 0
+}

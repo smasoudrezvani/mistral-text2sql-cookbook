@@ -1,0 +1,13 @@
+{
+ "run": "full_schema_mistral-large-4_all",
+ "approach": "full_schema",
+ "model": "mistral-large-4",
+ "slice": "all",
+ "n": 500,
+ "ex_bird": 0.602,
+ "ex_strict": 0.584,
+ "failed_to_run": 17,
+ "prompt_tokens": 1101931,
+ "completion_tokens": 1841509,
+ "cost_usd": 4.6385
+}

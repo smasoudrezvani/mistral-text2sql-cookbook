@@ -1,0 +1,13 @@
+{
+ "run": "full_schema_mistral-small-2603_all",
+ "approach": "full_schema",
+ "model": "mistral-small-2603",
+ "slice": "all",
+ "n": 500,
+ "ex_bird": 0.186,
+ "ex_strict": 0.174,
+ "failed_to_run": 42,
+ "prompt_tokens": 1221397,
+ "completion_tokens": 73086,
+ "cost_usd": 0.2271
+}

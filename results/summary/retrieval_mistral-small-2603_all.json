@@ -1,0 +1,17 @@
+{
+ "run": "retrieval_mistral-small-2603_all",
+ "approach": "retrieval",
+ "model": "mistral-small-2603",
+ "slice": "all",
+ "n": 500,
+ "ex_bird": 0.204,
+ "ex_strict": 0.196,
+ "failed_to_run": 52,
+ "prompt_tokens": 1199565,
+ "completion_tokens": 72476,
+ "cost_usd": 0.2234,
+ "table_recall": 0.996,
+ "avg_tables_kept": 6.44,
+ "avg_tables_total": 6.72,
+ "avg_distractors_kept": 0.0
+}

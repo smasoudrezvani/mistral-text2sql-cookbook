@@ -1,0 +1,17 @@
+{
+ "run": "retrieval_mistral-large-4_all",
+ "approach": "retrieval",
+ "model": "mistral-large-4",
+ "slice": "all",
+ "n": 500,
+ "ex_bird": 0.608,
+ "ex_strict": 0.582,
+ "failed_to_run": 14,
+ "prompt_tokens": 1081543,
+ "completion_tokens": 1942796,
+ "cost_usd": 4.837,
+ "table_recall": 0.996,
+ "avg_tables_kept": 6.44,
+ "avg_tables_total": 6.72,
+ "avg_distractors_kept": 0.0
+}

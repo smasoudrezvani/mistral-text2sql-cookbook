@@ -1,0 +1,19 @@
+{
+ "run": "retry_mistral-large-4_all",
+ "approach": "retry",
+ "model": "mistral-large-4",
+ "slice": "all",
+ "n": 500,
+ "ex_bird": 0.65,
+ "ex_strict": 0.622,
+ "failed_to_run": 4,
+ "prompt_tokens": 1215865,
+ "completion_tokens": 2216173,
+ "cost_usd": 5.5051,
+ "first_try_ex_bird": 0.608,
+ "first_try_failed_to_run": 16,
+ "avg_attempts": 1.09,
+ "retried": 32,
+ "fixed_by_retry": 21,
+ "broken_by_retry": 0
+}

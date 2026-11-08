@@ -1,0 +1,18 @@
+{
+ "run": "retrieval_ministral-8b-2512_all_distract",
+ "approach": "retrieval",
+ "model": "ministral-8b-2512",
+ "slice": "all",
+ "n": 500,
+ "ex_bird": 0.104,
+ "ex_strict": 0.094,
+ "failed_to_run": 122,
+ "prompt_tokens": 1518567,
+ "completion_tokens": 73109,
+ "cost_usd": 0.2388,
+ "used_distractor": 4,
+ "table_recall": 0.996,
+ "avg_tables_kept": 7.43,
+ "avg_tables_total": 36.72,
+ "avg_distractors_kept": 1.14
+}

@@ -91,12 +91,23 @@ def test_cosine():
 
 
 def test_tables_in_sql():
-    names = ["frpm", "schools", "satscores", "Player Attributes"]
+    names = ["frpm", "schools", "satscores", "Player Attributes", "order", "status"]
     sql = (
-        "SELECT s.School FROM schools AS s JOIN `Player Attributes` p ON 1 "
-        "WHERE s.note = 'frpm' AND x IN (SELECT 1 FROM SATSCORES)"
+        "SELECT s.School, s.status FROM schools AS s JOIN `Player Attributes` p ON 1 "
+        "WHERE s.note = 'frpm' AND x IN (SELECT 1 FROM SATSCORES) ORDER BY s.School"
     )
+    # 'order' (keyword), 'status' (column) and 'frpm' (string) are not tables read here
     assert tables_in_sql(sql, names) == {"schools", "Player Attributes", "satscores"}
+
+
+def test_tables_in_sql_cte_and_real_order_table():
+    names = ["order", "loan"]
+    sql = "WITH c AS (SELECT * FROM `order`) SELECT * FROM c JOIN loan ON 1 ORDER BY 1"
+    assert tables_in_sql(sql, names) == {"order", "loan"}
+
+
+def test_tables_in_sql_unparseable_falls_back():
+    assert tables_in_sql("SELEC x FROM loan WHERE ((", ["loan", "order"]) == {"loan"}
 
 
 def test_embed_batches_and_retries(monkeypatch):

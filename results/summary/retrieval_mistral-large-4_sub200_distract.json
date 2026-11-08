@@ -1,0 +1,18 @@
+{
+ "run": "retrieval_mistral-large-4_sub200_distract",
+ "approach": "retrieval",
+ "model": "mistral-large-4",
+ "slice": "sub200",
+ "n": 200,
+ "ex_bird": 0.64,
+ "ex_strict": 0.615,
+ "failed_to_run": 5,
+ "prompt_tokens": 541822,
+ "completion_tokens": 764406,
+ "cost_usd": 1.9845,
+ "used_distractor": 0,
+ "table_recall": 0.99,
+ "avg_tables_kept": 7.71,
+ "avg_tables_total": 37.12,
+ "avg_distractors_kept": 1.05
+}
