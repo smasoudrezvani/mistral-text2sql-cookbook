@@ -1,0 +1,31 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Data, databases, model outputs (never commit)
+data/
+results/raw/
+*.sqlite
+*.zip
+
+# Private notes (personal, not for the public repo)
+CLAUDE.md
+PROGRESS.md
+LEARNING_LOG.md
+FIRST_PROMPT.md
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Notebooks / editors
+.ipynb_checkpoints/
+.vscode/
+.idea/
