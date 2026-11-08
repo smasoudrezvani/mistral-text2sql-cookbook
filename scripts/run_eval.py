@@ -1,0 +1,234 @@
+"""Run one approach with one model on a slice of BIRD mini-dev.
+
+Approaches:
+    full_schema  (a) all tables + 3 example rows in the prompt
+    retrieval    (b) only the top-k tables by embedding similarity, plus FK-linked tables
+
+Resumable: per-question results are appended to results/raw/<approach>_<model>_<slice>.jsonl
+and questions already in that file are skipped. The summary is rebuilt from the whole file.
+
+Usage:
+    uv run python scripts/run_eval.py --approach full_schema --model ministral-8b-2512
+    uv run python scripts/run_eval.py --approach retrieval --model mistral-large-4 --slice all
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import time
+from pathlib import Path
+
+from dotenv import load_dotenv
+from mistralai.client import Mistral
+
+from text2sql_eval.bird import Question, db_path, load_gold_cache, load_questions
+from text2sql_eval.prompting import build_messages, chat, extract_sql
+from text2sql_eval.retrieval import (
+    embed,
+    foreign_key_neighbors,
+    select_tables,
+    table_docs,
+    tables_in_sql,
+)
+from text2sql_eval.schema import render_schema, table_names
+from text2sql_eval.scorer import compare, execute_sql
+
+ROOT = Path(__file__).resolve().parents[1]
+JSONL = ROOT / "data/raw/mini_dev_sqlite.jsonl"
+DB_ROOT = ROOT / "data/raw/minidev/MINIDEV/dev_databases"
+GOLD = ROOT / "data/cache/gold_results.json"
+EMB_CACHE = ROOT / "data/cache/embeddings.json"
+SLICES = ROOT / "slices"
+RAW_OUT = ROOT / "results/raw"
+SUMMARY_OUT = ROOT / "results/summary"
+
+# $ per 1M tokens (input, output), docs.mistral.ai/inference/pricing, checked 2026-11-08
+PRICES = {
+    "ministral-8b-2512": (0.15, 0.15),
+    "mistral-small-2603": (0.15, 0.60),
+    "mistral-large-4": (0.70, 2.10),
+}
+
+logger = logging.getLogger("run_eval")
+
+
+def load_embeddings(client: Mistral, questions: list[Question]) -> dict[str, dict]:
+    """Embed every table description and question once, caching to disk.
+
+    Args:
+        client: Mistral client.
+        questions: Questions that need a vector.
+
+    Returns:
+        ``{"tables": {db: {table: vec}}, "questions": {qid: vec}}``.
+    """
+    cache = (
+        json.loads(EMB_CACHE.read_text(encoding="utf-8"))
+        if EMB_CACHE.exists()
+        else {"tables": {}, "questions": {}}
+    )
+    for db_id in sorted({q.db_id for q in questions} - set(cache["tables"])):
+        docs = table_docs(db_path(DB_ROOT, db_id), DB_ROOT / db_id / "database_description")
+        vecs = embed(client, list(docs.values()))
+        cache["tables"][db_id] = dict(zip(docs, vecs, strict=True))
+        logger.info("embedded %d tables of %s", len(docs), db_id)
+    todo = [q for q in questions if str(q.question_id) not in cache["questions"]]
+    if todo:
+        texts = [f"{q.question}\nHint: {q.evidence}" if q.evidence else q.question for q in todo]
+        for q, v in zip(todo, embed(client, texts), strict=True):
+            cache["questions"][str(q.question_id)] = v
+        logger.info("embedded %d questions", len(todo))
+    EMB_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    EMB_CACHE.write_text(json.dumps(cache), encoding="utf-8")
+    return cache
+
+
+def summarize(raw_path: Path, approach: str, model: str, slice_name: str) -> dict[str, object]:
+    """Build the run summary from all per-question records in a raw results file.
+
+    Args:
+        raw_path: The run's JSONL file.
+        approach: Approach name.
+        model: Model name (for pricing).
+        slice_name: Slice name.
+
+    Returns:
+        Accuracy under both rules, failures, tokens, cost, and retrieval stats if present.
+    """
+    recs = [json.loads(line) for line in raw_path.read_text(encoding="utf-8").splitlines()]
+    n = len(recs)
+    tok_in = sum(r["prompt_tokens"] for r in recs)
+    tok_out = sum(r["completion_tokens"] for r in recs)
+    p_in, p_out = PRICES[model]
+    summary: dict[str, object] = {
+        "run": raw_path.stem,
+        "approach": approach,
+        "model": model,
+        "slice": slice_name,
+        "n": n,
+        "ex_bird": round(sum(r["bird"] for r in recs) / n, 4),
+        "ex_strict": round(sum(r["strict"] for r in recs) / n, 4),
+        "failed_to_run": sum(r["pred_error"] is not None for r in recs),
+        "prompt_tokens": tok_in,
+        "completion_tokens": tok_out,
+        "cost_usd": round(tok_in / 1e6 * p_in + tok_out / 1e6 * p_out, 4),
+    }
+    if recs and "table_recall" in recs[0]:
+        summary["table_recall"] = round(sum(r["table_recall"] for r in recs) / n, 4)
+        summary["avg_tables_kept"] = round(sum(len(r["tables"]) for r in recs) / n, 2)
+        summary["avg_tables_total"] = round(sum(r["n_tables_total"] for r in recs) / n, 2)
+    return summary
+
+
+def main() -> None:
+    """Run an approach on a slice, append per-question results, write a summary."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--approach", required=True, choices=["full_schema", "retrieval"])
+    parser.add_argument("--model", required=True, choices=sorted(PRICES))
+    parser.add_argument("--slice", default="dev50", help="'all' or a file name in slices/")
+    parser.add_argument("--n-rows", type=int, default=3, help="example rows per table")
+    parser.add_argument("--k", type=int, default=5, help="tables kept by similarity (retrieval)")
+    parser.add_argument("--rpm", type=float, default=0, help="max requests per minute (0 = no cap)")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    load_dotenv(ROOT / ".env")
+    client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
+
+    questions = load_questions(JSONL)
+    if args.slice != "all":
+        ids = set(json.loads((SLICES / f"{args.slice}.json").read_text())["question_ids"])
+        questions = [q for q in questions if q.question_id in ids]
+    gold = load_gold_cache(GOLD)
+    emb = load_embeddings(client, questions) if args.approach == "retrieval" else None
+    schemas: dict[tuple[str, tuple[str, ...] | None], str] = {}
+    neighbors: dict[str, dict[str, set[str]]] = {}
+
+    RAW_OUT.mkdir(parents=True, exist_ok=True)
+    raw_path = RAW_OUT / f"{args.approach}_{args.model}_{args.slice}.jsonl"
+    done: set[int] = set()
+    if raw_path.exists():
+        done = {json.loads(x)["question_id"] for x in raw_path.read_text().splitlines()}
+        logger.info("resuming: %d questions already done", len(done))
+    todo = [q for q in questions if q.question_id not in done]
+    min_gap = 60.0 / args.rpm if args.rpm else 0.0
+    last_call = 0.0
+
+    with raw_path.open("a", encoding="utf-8") as out:
+        for i, q in enumerate(todo, start=1):
+            db = db_path(DB_ROOT, q.db_id)
+            extra: dict[str, object] = {}
+            picked: tuple[str, ...] | None = None
+            if emb is not None:
+                if q.db_id not in neighbors:
+                    neighbors[q.db_id] = foreign_key_neighbors(db)
+                picked = tuple(
+                    select_tables(
+                        emb["questions"][str(q.question_id)],
+                        emb["tables"][q.db_id],
+                        neighbors[q.db_id],
+                        k=args.k,
+                    )
+                )
+                all_tables = table_names(db)
+                gold_tables = tables_in_sql(q.sql, all_tables)
+                extra = {
+                    "tables": list(picked),
+                    "gold_tables": sorted(gold_tables),
+                    "table_recall": gold_tables <= set(picked),
+                    "n_tables_total": len(all_tables),
+                }
+            key = (q.db_id, picked)
+            if key not in schemas:
+                schemas[key] = render_schema(
+                    db, n_rows=args.n_rows, tables=list(picked) if picked else None
+                )
+            messages = build_messages(schemas[key], q.question, q.evidence)
+
+            wait = last_call + min_gap - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+            last_call = time.monotonic()
+            reply = chat(client, args.model, messages)
+
+            sql = extract_sql(reply.text)
+            g = gold[q.question_id]
+            pred = execute_sql(db, sql, timeout_s=g.pred_timeout_s)
+            score = compare(pred, g.as_exec_result(), q.sql)
+            record = {
+                "question_id": q.question_id,
+                "db_id": q.db_id,
+                "difficulty": q.difficulty,
+                "pred_sql": sql,
+                "pred_error": pred.error,
+                "pred_rows": len(pred.rows) if pred.rows is not None else None,
+                "bird": score.bird,
+                "strict": score.strict,
+                "prompt_tokens": reply.prompt_tokens,
+                "completion_tokens": reply.completion_tokens,
+                **extra,
+            }
+            out.write(json.dumps(record) + "\n")
+            out.flush()
+            logger.info(
+                "%d/%d q%d bird=%s strict=%s%s",
+                i,
+                len(todo),
+                q.question_id,
+                score.bird,
+                score.strict,
+                f" error={pred.error[:60]}" if pred.error else "",
+            )
+
+    summary = summarize(raw_path, args.approach, args.model, args.slice)
+    SUMMARY_OUT.mkdir(parents=True, exist_ok=True)
+    (SUMMARY_OUT / f"{raw_path.stem}.json").write_text(json.dumps(summary, indent=1) + "\n")
+    logger.info("summary: %s", summary)
+
+
+if __name__ == "__main__":
+    main()
