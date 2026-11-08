@@ -71,6 +71,7 @@ def execute_sql(
     sql: str,
     timeout_s: float = DEFAULT_TIMEOUT_S,
     max_rows: int | None = DEFAULT_MAX_ROWS,
+    attach: list[Path] | None = None,
 ) -> ExecResult:
     """Run one SQL query on a SQLite database, read-only, with a timeout.
 
@@ -79,6 +80,8 @@ def execute_sql(
         sql: A single SQL statement.
         timeout_s: Stop the query after this many seconds.
         max_rows: Fail if the result has more rows than this (None = no limit).
+        attach: Extra databases to ATTACH read-only (e.g. distractor tables). Unqualified
+            table names resolve in the main database first.
 
     Returns:
         An ExecResult with rows, or with the error / timeout recorded.
@@ -100,6 +103,10 @@ def execute_sql(
         return ExecResult(rows=None, error=str(e), seconds=time.monotonic() - start)
 
     try:
+        for i, extra in enumerate(attach or []):
+            con.execute(
+                f"ATTACH DATABASE ? AS extra{i}", (f"{Path(extra).resolve().as_uri()}?mode=ro",)
+            )
         con.set_progress_handler(_check_deadline, _PROGRESS_EVERY_N_STEPS)
         cur = con.execute(sql)
         rows: list[Row] = []

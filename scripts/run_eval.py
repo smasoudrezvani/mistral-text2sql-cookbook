@@ -29,6 +29,7 @@ from mistralai.client import Mistral
 
 from text2sql_eval.agent import solve_with_retry
 from text2sql_eval.bird import Question, db_path, load_gold_cache, load_questions
+from text2sql_eval.distractors import load_manifest
 from text2sql_eval.prompting import build_messages, chat, extract_sql
 from text2sql_eval.retrieval import (
     embed,
@@ -45,6 +46,7 @@ JSONL = ROOT / "data/raw/mini_dev_sqlite.jsonl"
 DB_ROOT = ROOT / "data/raw/minidev/MINIDEV/dev_databases"
 GOLD = ROOT / "data/cache/gold_results.json"
 EMB_CACHE = ROOT / "data/cache/embeddings.json"
+DISTRACT = ROOT / "data/cache/distractors"
 SLICES = ROOT / "slices"
 RAW_OUT = ROOT / "results/raw"
 SUMMARY_OUT = ROOT / "results/summary"
@@ -59,12 +61,15 @@ PRICES = {
 logger = logging.getLogger("run_eval")
 
 
-def load_embeddings(client: Mistral, questions: list[Question]) -> dict[str, dict]:
+def load_embeddings(
+    client: Mistral, questions: list[Question], extra_db_ids: set[str] | None = None
+) -> dict[str, dict]:
     """Embed every table description and question once, caching to disk.
 
     Args:
         client: Mistral client.
         questions: Questions that need a vector.
+        extra_db_ids: More databases whose tables need vectors (distractor sources).
 
     Returns:
         ``{"tables": {db: {table: vec}}, "questions": {qid: vec}}``.
@@ -74,7 +79,8 @@ def load_embeddings(client: Mistral, questions: list[Question]) -> dict[str, dic
         if EMB_CACHE.exists()
         else {"tables": {}, "questions": {}}
     )
-    for db_id in sorted({q.db_id for q in questions} - set(cache["tables"])):
+    wanted = {q.db_id for q in questions} | (extra_db_ids or set())
+    for db_id in sorted(wanted - set(cache["tables"])):
         docs = table_docs(db_path(DB_ROOT, db_id), DB_ROOT / db_id / "database_description")
         vecs = embed(client, list(docs.values()))
         cache["tables"][db_id] = dict(zip(docs, vecs, strict=True))
@@ -127,10 +133,16 @@ def summarize(raw_path: Path, approach: str, model: str, slice_name: str) -> dic
         summary["retried"] = sum(r["attempts"] > 1 for r in recs)
         summary["fixed_by_retry"] = sum(r["bird"] and not r["first_bird"] for r in recs)
         summary["broken_by_retry"] = sum(r["first_bird"] and not r["bird"] for r in recs)
+    if recs and "used_distractor" in recs[0]:
+        summary["used_distractor"] = sum(r["used_distractor"] for r in recs)
     if recs and "table_recall" in recs[0]:
         summary["table_recall"] = round(sum(r["table_recall"] for r in recs) / n, 4)
         summary["avg_tables_kept"] = round(sum(len(r["tables"]) for r in recs) / n, 2)
         summary["avg_tables_total"] = round(sum(r["n_tables_total"] for r in recs) / n, 2)
+        if "n_distractors_kept" in recs[0]:
+            summary["avg_distractors_kept"] = round(
+                sum(r["n_distractors_kept"] for r in recs) / n, 2
+            )
     return summary
 
 
@@ -147,6 +159,11 @@ def main() -> None:
     parser.add_argument("--k", type=int, default=5, help="tables kept by similarity (retrieval)")
     parser.add_argument("--rpm", type=float, default=0, help="max requests per minute (0 = no cap)")
     parser.add_argument("--workers", type=int, default=1, help="questions answered in parallel")
+    parser.add_argument(
+        "--distractors",
+        action="store_true",
+        help="add 30 distractor tables per database (run scripts/build_distractors.py first)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -159,12 +176,20 @@ def main() -> None:
         ids = set(json.loads((SLICES / f"{args.slice}.json").read_text())["question_ids"])
         questions = [q for q in questions if q.question_id in ids]
     gold = load_gold_cache(GOLD)
-    emb = load_embeddings(client, questions) if args.approach == "retrieval" else None
+    manifests: dict[str, dict[str, str]] = {}
+    if args.distractors:
+        manifests = {
+            db_id: load_manifest(DISTRACT / f"{db_id}.sqlite")
+            for db_id in {q.db_id for q in questions}
+        }
+    sources = {src for m in manifests.values() for src in m.values()}
+    emb = load_embeddings(client, questions, sources) if args.approach == "retrieval" else None
     schemas: dict[tuple[str, tuple[str, ...] | None], str] = {}
     neighbors: dict[str, dict[str, set[str]]] = {}
 
     RAW_OUT.mkdir(parents=True, exist_ok=True)
-    raw_path = RAW_OUT / f"{args.approach}_{args.model}_{args.slice}.jsonl"
+    suffix = "_distract" if args.distractors else ""
+    raw_path = RAW_OUT / f"{args.approach}_{args.model}_{args.slice}{suffix}.jsonl"
     done: set[int] = set()
     if raw_path.exists():
         done = {json.loads(x)["question_id"] for x in raw_path.read_text().splitlines()}
@@ -189,29 +214,38 @@ def main() -> None:
         db = db_path(DB_ROOT, q.db_id)
         extra: dict[str, object] = {}
         picked: tuple[str, ...] | None = None
+        extra_dbs = [DISTRACT / f"{q.db_id}.sqlite"] if args.distractors else None
+        fakes = manifests.get(q.db_id, {})
         if emb is not None:
+            table_vecs = dict(emb["tables"][q.db_id])
+            table_vecs.update({t: emb["tables"][src][t] for t, src in fakes.items()})
             if q.db_id not in neighbors:
                 neighbors[q.db_id] = foreign_key_neighbors(db)
             picked = tuple(
                 select_tables(
                     emb["questions"][str(q.question_id)],
-                    emb["tables"][q.db_id],
+                    table_vecs,
                     neighbors[q.db_id],
                     k=args.k,
                 )
             )
-            all_tables = table_names(db)
+            all_tables = table_names(db, extra_dbs)
             gold_tables = tables_in_sql(q.sql, all_tables)
             extra = {
                 "tables": list(picked),
                 "gold_tables": sorted(gold_tables),
                 "table_recall": gold_tables <= set(picked),
                 "n_tables_total": len(all_tables),
+                "n_distractors_kept": sum(t in fakes for t in picked),
             }
         key = (q.db_id, picked)
         if key not in schemas:
             schemas[key] = render_schema(
-                db, n_rows=args.n_rows, tables=list(picked) if picked else None
+                db,
+                n_rows=args.n_rows,
+                tables=list(picked) if picked else None,
+                extra_dbs=extra_dbs,
+                shuffle_seed=0 if extra_dbs and picked is None else None,
             )
         messages = build_messages(schemas[key], q.question, q.evidence)
         g = gold[q.question_id]
@@ -225,6 +259,7 @@ def main() -> None:
                 db,
                 timeout_s=g.pred_timeout_s,
                 max_attempts=args.max_attempts,
+                attach=extra_dbs,
             )
             sql, pred = agent.sql, agent.result
             tok_in, tok_out = agent.prompt_tokens, agent.completion_tokens
@@ -240,11 +275,13 @@ def main() -> None:
         else:
             reply = chat(client, args.model, messages)
             sql = extract_sql(reply.text)
-            pred = execute_sql(db, sql, timeout_s=g.pred_timeout_s)
+            pred = execute_sql(db, sql, timeout_s=g.pred_timeout_s, attach=extra_dbs)
             tok_in, tok_out = reply.prompt_tokens, reply.completion_tokens
             extra["finish_reason"] = reply.finish_reason
 
         score = compare(pred, g.as_exec_result(), q.sql)
+        if fakes:
+            extra["used_distractor"] = bool(tables_in_sql(sql, list(fakes)))
         return {
             "question_id": q.question_id,
             "db_id": q.db_id,

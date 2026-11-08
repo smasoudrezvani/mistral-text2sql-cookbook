@@ -80,6 +80,7 @@ def solve_with_retry(
     db_path: Path,
     timeout_s: float,
     max_attempts: int = 3,
+    attach: list[Path] | None = None,
 ) -> AgentResult:
     """Ask for SQL, run it, and retry with execution feedback until it looks fine.
 
@@ -90,6 +91,7 @@ def solve_with_retry(
         db_path: SQLite database to run against.
         timeout_s: Timeout per execution.
         max_attempts: Maximum model calls (1 = no retry).
+        attach: Extra databases to attach when running SQL (e.g. distractor tables).
 
     Returns:
         The final SQL and result, plus the first attempt and token totals.
@@ -107,7 +109,7 @@ def solve_with_retry(
         tok_out += reply.completion_tokens
         sql = extract_sql(reply.text)
         result = (
-            execute_sql(db_path, sql, timeout_s=timeout_s)
+            execute_sql(db_path, sql, timeout_s=timeout_s, attach=attach)
             if sql
             else ExecResult(rows=None, error=NO_SQL)
         )
