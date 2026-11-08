@@ -1,0 +1,19 @@
+{
+ "run": "retry_mistral-large-4_dev50",
+ "approach": "retry",
+ "model": "mistral-large-4",
+ "slice": "dev50",
+ "n": 50,
+ "ex_bird": 0.76,
+ "ex_strict": 0.72,
+ "failed_to_run": 0,
+ "prompt_tokens": 115125,
+ "completion_tokens": 192737,
+ "cost_usd": 0.4853,
+ "first_try_ex_bird": 0.74,
+ "first_try_failed_to_run": 1,
+ "avg_attempts": 1.06,
+ "retried": 2,
+ "fixed_by_retry": 1,
+ "broken_by_retry": 0
+}

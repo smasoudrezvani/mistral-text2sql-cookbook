@@ -1,0 +1,19 @@
+{
+ "run": "retry_mistral-small-2603_dev50",
+ "approach": "retry",
+ "model": "mistral-small-2603",
+ "slice": "dev50",
+ "n": 50,
+ "ex_bird": 0.18,
+ "ex_strict": 0.18,
+ "failed_to_run": 1,
+ "prompt_tokens": 148136,
+ "completion_tokens": 9696,
+ "cost_usd": 0.028,
+ "first_try_ex_bird": 0.18,
+ "first_try_failed_to_run": 1,
+ "avg_attempts": 1.2,
+ "retried": 5,
+ "fixed_by_retry": 0,
+ "broken_by_retry": 0
+}

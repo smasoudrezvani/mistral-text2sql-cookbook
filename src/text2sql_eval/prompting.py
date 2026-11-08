@@ -87,11 +87,13 @@ class Completion:
         text: Reply content.
         prompt_tokens: Input tokens billed.
         completion_tokens: Output tokens billed.
+        finish_reason: Why generation stopped (``"length"`` = hit max_tokens).
     """
 
     text: str
     prompt_tokens: int
     completion_tokens: int
+    finish_reason: str = "stop"
 
 
 def chat(
@@ -99,7 +101,7 @@ def chat(
     model: str,
     messages: list[dict[str, str]],
     temperature: float = 0.0,
-    max_tokens: int = 8192,  # room for reasoning tokens before the answer
+    max_tokens: int = 16384,  # Large 4 sometimes reasons past 8k tokens before answering
     retries: int = 6,
 ) -> Completion:
     """Call Mistral chat completion with retry on transient errors.
@@ -132,10 +134,15 @@ def chat(
                 max_tokens=max_tokens,
             )
             usage = resp.usage
+            choice = resp.choices[0]
+            finish = str(getattr(choice, "finish_reason", None) or "stop")
+            if finish == "length":
+                logger.warning("reply hit max_tokens=%d before finishing", max_tokens)
             return Completion(
-                text=content_text(resp.choices[0].message.content),
+                text=content_text(choice.message.content),
                 prompt_tokens=usage.prompt_tokens or 0,
                 completion_tokens=usage.completion_tokens or 0,
+                finish_reason=finish,
             )
         except Exception as e:  # SDK raises several error types; retry transient ones
             status = getattr(e, "status_code", None)

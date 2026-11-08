@@ -45,6 +45,13 @@ def test_sends_top_p_one_and_returns_usage():
     assert (c.prompt_tokens, c.completion_tokens) == (10, 3)
 
 
+def test_finish_reason_recorded():
+    resp = _reply()
+    resp.choices[0].finish_reason = "length"
+    assert chat(FakeClient([resp]), "m", []).finish_reason == "length"
+    assert chat(FakeClient([_reply()]), "m", []).finish_reason == "stop"
+
+
 def test_bad_request_is_not_retried():
     client = FakeClient([FakeError(400), _reply()])
     with pytest.raises(FakeError):

@@ -1,0 +1,16 @@
+{
+ "run": "retrieval_mistral-small-2603_dev50",
+ "approach": "retrieval",
+ "model": "mistral-small-2603",
+ "slice": "dev50",
+ "n": 50,
+ "ex_bird": 0.22,
+ "ex_strict": 0.2,
+ "failed_to_run": 5,
+ "prompt_tokens": 115528,
+ "completion_tokens": 8055,
+ "cost_usd": 0.0222,
+ "table_recall": 1.0,
+ "avg_tables_kept": 6.32,
+ "avg_tables_total": 6.5
+}

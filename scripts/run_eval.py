@@ -3,6 +3,7 @@
 Approaches:
     full_schema  (a) all tables + 3 example rows in the prompt
     retrieval    (b) only the top-k tables by embedding similarity, plus FK-linked tables
+    retry        (c) full schema, then run the SQL and retry with the error / empty-result feedback
 
 Resumable: per-question results are appended to results/raw/<approach>_<model>_<slice>.jsonl
 and questions already in that file are skipped. The summary is rebuilt from the whole file.
@@ -24,6 +25,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from mistralai.client import Mistral
 
+from text2sql_eval.agent import solve_with_retry
 from text2sql_eval.bird import Question, db_path, load_gold_cache, load_questions
 from text2sql_eval.prompting import build_messages, chat, extract_sql
 from text2sql_eval.retrieval import (
@@ -116,6 +118,13 @@ def summarize(raw_path: Path, approach: str, model: str, slice_name: str) -> dic
         "completion_tokens": tok_out,
         "cost_usd": round(tok_in / 1e6 * p_in + tok_out / 1e6 * p_out, 4),
     }
+    if recs and "attempts" in recs[0]:
+        summary["first_try_ex_bird"] = round(sum(r["first_bird"] for r in recs) / n, 4)
+        summary["first_try_failed_to_run"] = sum(r["first_error"] is not None for r in recs)
+        summary["avg_attempts"] = round(sum(r["attempts"] for r in recs) / n, 2)
+        summary["retried"] = sum(r["attempts"] > 1 for r in recs)
+        summary["fixed_by_retry"] = sum(r["bird"] and not r["first_bird"] for r in recs)
+        summary["broken_by_retry"] = sum(r["first_bird"] and not r["bird"] for r in recs)
     if recs and "table_recall" in recs[0]:
         summary["table_recall"] = round(sum(r["table_recall"] for r in recs) / n, 4)
         summary["avg_tables_kept"] = round(sum(len(r["tables"]) for r in recs) / n, 2)
@@ -126,7 +135,10 @@ def summarize(raw_path: Path, approach: str, model: str, slice_name: str) -> dic
 def main() -> None:
     """Run an approach on a slice, append per-question results, write a summary."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--approach", required=True, choices=["full_schema", "retrieval"])
+    parser.add_argument("--approach", required=True, choices=["full_schema", "retrieval", "retry"])
+    parser.add_argument(
+        "--max-attempts", type=int, default=3, help="model calls per question (retry)"
+    )
     parser.add_argument("--model", required=True, choices=sorted(PRICES))
     parser.add_argument("--slice", default="dev50", help="'all' or a file name in slices/")
     parser.add_argument("--n-rows", type=int, default=3, help="example rows per table")
@@ -193,11 +205,35 @@ def main() -> None:
             if wait > 0:
                 time.sleep(wait)
             last_call = time.monotonic()
-            reply = chat(client, args.model, messages)
-
-            sql = extract_sql(reply.text)
             g = gold[q.question_id]
-            pred = execute_sql(db, sql, timeout_s=g.pred_timeout_s)
+
+            if args.approach == "retry":
+                agent = solve_with_retry(
+                    client,
+                    args.model,
+                    messages,
+                    db,
+                    timeout_s=g.pred_timeout_s,
+                    max_attempts=args.max_attempts,
+                )
+                sql, pred = agent.sql, agent.result
+                tok_in, tok_out = agent.prompt_tokens, agent.completion_tokens
+                first = compare(agent.first_result, g.as_exec_result(), q.sql)
+                extra = {
+                    "attempts": agent.attempts,
+                    "feedback": agent.feedback,
+                    "first_sql": agent.first_sql,
+                    "first_error": agent.first_result.error,
+                    "first_bird": first.bird,
+                    "first_strict": first.strict,
+                }
+            else:
+                reply = chat(client, args.model, messages)
+                sql = extract_sql(reply.text)
+                pred = execute_sql(db, sql, timeout_s=g.pred_timeout_s)
+                tok_in, tok_out = reply.prompt_tokens, reply.completion_tokens
+                extra["finish_reason"] = reply.finish_reason
+
             score = compare(pred, g.as_exec_result(), q.sql)
             record = {
                 "question_id": q.question_id,
@@ -208,8 +244,8 @@ def main() -> None:
                 "pred_rows": len(pred.rows) if pred.rows is not None else None,
                 "bird": score.bird,
                 "strict": score.strict,
-                "prompt_tokens": reply.prompt_tokens,
-                "completion_tokens": reply.completion_tokens,
+                "prompt_tokens": tok_in,
+                "completion_tokens": tok_out,
                 **extra,
             }
             out.write(json.dumps(record) + "\n")

@@ -4,10 +4,10 @@
  "model": "mistral-large-4",
  "slice": "dev50",
  "n": 50,
- "ex_bird": 0.68,
- "ex_strict": 0.66,
+ "ex_bird": 0.72,
+ "ex_strict": 0.7,
  "failed_to_run": 0,
  "prompt_tokens": 106040,
- "completion_tokens": 133243,
- "cost_usd": 0.354
+ "completion_tokens": 131523,
+ "cost_usd": 0.3504
 }
