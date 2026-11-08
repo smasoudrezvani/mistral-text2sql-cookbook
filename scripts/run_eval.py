@@ -19,7 +19,9 @@ import argparse
 import json
 import logging
 import os
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -144,6 +146,7 @@ def main() -> None:
     parser.add_argument("--n-rows", type=int, default=3, help="example rows per table")
     parser.add_argument("--k", type=int, default=5, help="tables kept by similarity (retrieval)")
     parser.add_argument("--rpm", type=float, default=0, help="max requests per minute (0 = no cap)")
+    parser.add_argument("--workers", type=int, default=1, help="questions answered in parallel")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -168,97 +171,127 @@ def main() -> None:
         logger.info("resuming: %d questions already done", len(done))
     todo = [q for q in questions if q.question_id not in done]
     min_gap = 60.0 / args.rpm if args.rpm else 0.0
-    last_call = 0.0
+    pace_lock = threading.Lock()
+    last_call = [0.0]
 
-    with raw_path.open("a", encoding="utf-8") as out:
-        for i, q in enumerate(todo, start=1):
-            db = db_path(DB_ROOT, q.db_id)
-            extra: dict[str, object] = {}
-            picked: tuple[str, ...] | None = None
-            if emb is not None:
-                if q.db_id not in neighbors:
-                    neighbors[q.db_id] = foreign_key_neighbors(db)
-                picked = tuple(
-                    select_tables(
-                        emb["questions"][str(q.question_id)],
-                        emb["tables"][q.db_id],
-                        neighbors[q.db_id],
-                        k=args.k,
-                    )
-                )
-                all_tables = table_names(db)
-                gold_tables = tables_in_sql(q.sql, all_tables)
-                extra = {
-                    "tables": list(picked),
-                    "gold_tables": sorted(gold_tables),
-                    "table_recall": gold_tables <= set(picked),
-                    "n_tables_total": len(all_tables),
-                }
-            key = (q.db_id, picked)
-            if key not in schemas:
-                schemas[key] = render_schema(
-                    db, n_rows=args.n_rows, tables=list(picked) if picked else None
-                )
-            messages = build_messages(schemas[key], q.question, q.evidence)
-
-            wait = last_call + min_gap - time.monotonic()
+    def pace() -> None:
+        """Keep at least min_gap seconds between API calls (only used with --rpm)."""
+        if not min_gap:
+            return
+        with pace_lock:
+            wait = last_call[0] + min_gap - time.monotonic()
             if wait > 0:
                 time.sleep(wait)
-            last_call = time.monotonic()
-            g = gold[q.question_id]
+            last_call[0] = time.monotonic()
 
-            if args.approach == "retry":
-                agent = solve_with_retry(
-                    client,
-                    args.model,
-                    messages,
-                    db,
-                    timeout_s=g.pred_timeout_s,
-                    max_attempts=args.max_attempts,
+    def solve(q: Question) -> dict[str, object]:
+        """Answer and score one question; returns its result record."""
+        db = db_path(DB_ROOT, q.db_id)
+        extra: dict[str, object] = {}
+        picked: tuple[str, ...] | None = None
+        if emb is not None:
+            if q.db_id not in neighbors:
+                neighbors[q.db_id] = foreign_key_neighbors(db)
+            picked = tuple(
+                select_tables(
+                    emb["questions"][str(q.question_id)],
+                    emb["tables"][q.db_id],
+                    neighbors[q.db_id],
+                    k=args.k,
                 )
-                sql, pred = agent.sql, agent.result
-                tok_in, tok_out = agent.prompt_tokens, agent.completion_tokens
-                first = compare(agent.first_result, g.as_exec_result(), q.sql)
-                extra = {
-                    "attempts": agent.attempts,
-                    "feedback": agent.feedback,
-                    "first_sql": agent.first_sql,
-                    "first_error": agent.first_result.error,
-                    "first_bird": first.bird,
-                    "first_strict": first.strict,
-                }
-            else:
-                reply = chat(client, args.model, messages)
-                sql = extract_sql(reply.text)
-                pred = execute_sql(db, sql, timeout_s=g.pred_timeout_s)
-                tok_in, tok_out = reply.prompt_tokens, reply.completion_tokens
-                extra["finish_reason"] = reply.finish_reason
-
-            score = compare(pred, g.as_exec_result(), q.sql)
-            record = {
-                "question_id": q.question_id,
-                "db_id": q.db_id,
-                "difficulty": q.difficulty,
-                "pred_sql": sql,
-                "pred_error": pred.error,
-                "pred_rows": len(pred.rows) if pred.rows is not None else None,
-                "bird": score.bird,
-                "strict": score.strict,
-                "prompt_tokens": tok_in,
-                "completion_tokens": tok_out,
-                **extra,
-            }
-            out.write(json.dumps(record) + "\n")
-            out.flush()
-            logger.info(
-                "%d/%d q%d bird=%s strict=%s%s",
-                i,
-                len(todo),
-                q.question_id,
-                score.bird,
-                score.strict,
-                f" error={pred.error[:60]}" if pred.error else "",
             )
+            all_tables = table_names(db)
+            gold_tables = tables_in_sql(q.sql, all_tables)
+            extra = {
+                "tables": list(picked),
+                "gold_tables": sorted(gold_tables),
+                "table_recall": gold_tables <= set(picked),
+                "n_tables_total": len(all_tables),
+            }
+        key = (q.db_id, picked)
+        if key not in schemas:
+            schemas[key] = render_schema(
+                db, n_rows=args.n_rows, tables=list(picked) if picked else None
+            )
+        messages = build_messages(schemas[key], q.question, q.evidence)
+        g = gold[q.question_id]
+        pace()
+
+        if args.approach == "retry":
+            agent = solve_with_retry(
+                client,
+                args.model,
+                messages,
+                db,
+                timeout_s=g.pred_timeout_s,
+                max_attempts=args.max_attempts,
+            )
+            sql, pred = agent.sql, agent.result
+            tok_in, tok_out = agent.prompt_tokens, agent.completion_tokens
+            first = compare(agent.first_result, g.as_exec_result(), q.sql)
+            extra = {
+                "attempts": agent.attempts,
+                "feedback": agent.feedback,
+                "first_sql": agent.first_sql,
+                "first_error": agent.first_result.error,
+                "first_bird": first.bird,
+                "first_strict": first.strict,
+            }
+        else:
+            reply = chat(client, args.model, messages)
+            sql = extract_sql(reply.text)
+            pred = execute_sql(db, sql, timeout_s=g.pred_timeout_s)
+            tok_in, tok_out = reply.prompt_tokens, reply.completion_tokens
+            extra["finish_reason"] = reply.finish_reason
+
+        score = compare(pred, g.as_exec_result(), q.sql)
+        return {
+            "question_id": q.question_id,
+            "db_id": q.db_id,
+            "difficulty": q.difficulty,
+            "pred_sql": sql,
+            "pred_error": pred.error,
+            "pred_rows": len(pred.rows) if pred.rows is not None else None,
+            "bird": score.bird,
+            "strict": score.strict,
+            "prompt_tokens": tok_in,
+            "completion_tokens": tok_out,
+            **extra,
+        }
+
+    write_lock = threading.Lock()
+    n_done = [0]
+    n_failed = [0]
+    with raw_path.open("a", encoding="utf-8") as out:
+
+        def record_result(q: Question, fut: Future[dict[str, object]]) -> None:
+            try:
+                rec = fut.result()
+            except Exception as e:  # one bad question must not stop the run; resume retries it
+                n_failed[0] += 1
+                logger.error("q%d failed, will be retried on resume: %.200s", q.question_id, e)
+                return
+            with write_lock:
+                out.write(json.dumps(rec) + "\n")
+                out.flush()
+                n_done[0] += 1
+                logger.info(
+                    "%d/%d q%d bird=%s strict=%s%s",
+                    n_done[0],
+                    len(todo),
+                    q.question_id,
+                    rec["bird"],
+                    rec["strict"],
+                    f" error={str(rec['pred_error'])[:60]}" if rec["pred_error"] else "",
+                )
+
+        with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+            futures = {pool.submit(solve, q): q for q in todo}
+            for fut in as_completed(futures):
+                record_result(futures[fut], fut)
+
+    if n_failed[0]:
+        logger.warning("%d questions failed; run the same command again to retry them", n_failed[0])
 
     summary = summarize(raw_path, args.approach, args.model, args.slice)
     SUMMARY_OUT.mkdir(parents=True, exist_ok=True)
