@@ -165,7 +165,7 @@ def build() -> nbformat.NotebookNode:
     md(f"""
 # Text-to-SQL with Mistral models: measuring execution accuracy on BIRD
 
-*Author: Masoud Rezvaninejad ([@smasoudrezvani](https://github.com/smasoudrezvani)), AFFILIATION_TBD*
+*Author: Masoud Rezvaninejad ([@smasoudrezvani](https://github.com/smasoudrezvani)), Independent*
 
 Turning a question like *"What is the average weight of heroes as smart as Abomination?"* into SQL
 looks easy, until the database has real-world quirks: a weight of `0` that means "unknown", numbers

@@ -1,6 +1,6 @@
 # Why text-to-SQL answers fail: one real example per error type
 
-System: Mistral Large 4, approach (c) execute-and-retry, BIRD mini-dev (2026 release), 500 questions, 65.0% correct. 50 of the 175 wrong answers were labelled by hand (`results/error_labels/retry_mistral-large-4_all_sample50.json`).
+System: Mistral Large 4, approach (c) execute-and-retry, BIRD mini-dev (2026 release), 500 questions, 65.0% correct. 50 of the 175 wrong answers were labelled one by one (`results/error_labels/retry_mistral-large-4_all_sample50.json`).
 
 | Category | Count (of 50) |
 |---|---|

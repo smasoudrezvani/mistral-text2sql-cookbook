@@ -128,7 +128,7 @@ def main() -> None:
     parts = [
         "# Why text-to-SQL answers fail: one real example per error type\n",
         "System: Mistral Large 4, approach (c) execute-and-retry, BIRD mini-dev (2026 release), "
-        "500 questions, 65.0% correct. 50 of the 175 wrong answers were labelled by hand "
+        "500 questions, 65.0% correct. 50 of the 175 wrong answers were labelled one by one "
         f"(`results/error_labels/{RUN}_sample50.json`).\n",
         "| Category | Count (of 50) |\n|---|---|",
         *[f"| {title} | {counts.get(cat, 0)} |" for cat, title, _, _ in EXAMPLES],

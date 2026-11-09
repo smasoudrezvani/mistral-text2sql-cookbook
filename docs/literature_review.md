@@ -6,7 +6,7 @@ with the two papers the decision rests on re-checked against the papers themselv
 ## The question
 
 Our best system (Mistral Large 4 + execute-and-retry) gets **65.0%** on BIRD mini-dev (500
-questions). In 50 hand-labelled failures, **21 were dirty data**: 0 / '' / '-' meaning "unknown",
+questions). In 50 labelled failures, **21 were dirty data**: 0 / '' / '-' meaning "unknown",
 numbers stored as text, codes with leading zeros, lists packed into one field, placeholders like
 'No Colour' (see [error_examples.md](error_examples.md)).
 

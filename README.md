@@ -30,7 +30,7 @@ BIRD's per-question hints already in the prompt (paired McNemar test: p <= 0.01 
 More findings:
 - With 30 unrelated **distractor tables** per database, (a) loses 3-6 points; (b) schema retrieval holds.
 - **Value retrieval** and **majority voting** gave no clear gain.
-- Of 50 hand-labelled failures of Large 4 + retry, **21 were dirty data**
+- Of 50 labelled failures of Large 4 + retry, **21 were dirty data**
   ([docs/error_examples.md](docs/error_examples.md)).
 - Literature context: [docs/literature_review.md](docs/literature_review.md).
 
