@@ -58,3 +58,16 @@ def test_render_schema(tmp_path: Path):
     assert "example rows" not in render_schema(db, n_rows=0)
     only = render_schema(db, tables=["other"])
     assert "my table" not in only
+
+
+def test_render_schema_with_notes(tmp_path: Path):
+    db = tmp_path / "n.sqlite"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE superhero (name TEXT, weight_kg INTEGER)")
+    con.execute("INSERT INTO superhero VALUES ('a', 0)")
+    con.commit()
+    con.close()
+    notes = {"superhero": {"weight_kg": "0 means missing"}}
+    text = render_schema(db, notes=notes)
+    assert "/* Column notes for superhero:\n- weight_kg: 0 means missing\n*/" in text
+    assert "Column notes" not in render_schema(db)

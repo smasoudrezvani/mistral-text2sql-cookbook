@@ -31,6 +31,7 @@ from mistralai.client import Mistral
 from text2sql_eval.agent import solve_with_retry
 from text2sql_eval.bird import Question, db_path, load_gold_cache, load_questions
 from text2sql_eval.distractors import load_manifest
+from text2sql_eval.notes import load_notes
 from text2sql_eval.prompting import build_messages, chat, extract_sql
 from text2sql_eval.retrieval import (
     embed,
@@ -51,6 +52,7 @@ GOLD = ROOT / "data/cache/gold_results.json"
 EMB_CACHE = ROOT / "data/cache/embeddings.json"
 DISTRACT = ROOT / "data/cache/distractors"
 VALUES = ROOT / "data/cache/values"
+NOTES = ROOT / "data/cache/notes"
 SLICES = ROOT / "slices"
 RAW_OUT = ROOT / "results/raw"
 SUMMARY_OUT = ROOT / "results/summary"
@@ -183,6 +185,11 @@ def main() -> None:
         help="add 30 distractor tables per database (run scripts/build_distractors.py first)",
     )
     parser.add_argument(
+        "--notes",
+        action="store_true",
+        help="add column notes: BIRD descriptions + data profile (run scripts/build_notes.py)",
+    )
+    parser.add_argument(
         "--values",
         action="store_true",
         help="add matching stored values to the prompt (run scripts/build_value_index.py first)",
@@ -211,7 +218,14 @@ def main() -> None:
     neighbors: dict[str, dict[str, set[str]]] = {}
 
     RAW_OUT.mkdir(parents=True, exist_ok=True)
-    suffix = ("_distract" if args.distractors else "") + ("_values" if args.values else "")
+    suffix = (
+        ("_distract" if args.distractors else "")
+        + ("_values" if args.values else "")
+        + ("_notes" if args.notes else "")
+    )
+    col_notes: dict[str, dict[str, dict[str, str]]] = {}
+    if args.notes:
+        col_notes = {d: load_notes(NOTES / f"{d}.json") for d in {q.db_id for q in questions}}
     value_idx: dict[str, ValueIndex] = {}
     if args.values:
         value_idx = {d: ValueIndex.load(VALUES / f"{d}.json") for d in {q.db_id for q in questions}}
@@ -272,6 +286,7 @@ def main() -> None:
                 tables=list(picked) if picked else None,
                 extra_dbs=extra_dbs,
                 shuffle_seed=0 if extra_dbs and picked is None else None,
+                notes=col_notes.get(q.db_id),
             )
         hits = value_idx[q.db_id].search(f"{q.question}\n{q.evidence}") if value_idx else []
         messages = build_messages(schemas[key], q.question, q.evidence, format_hits(hits))

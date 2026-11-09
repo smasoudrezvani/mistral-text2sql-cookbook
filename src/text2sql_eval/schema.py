@@ -54,6 +54,7 @@ def render_schema(
     tables: list[str] | None = None,
     extra_dbs: list[Path] | None = None,
     shuffle_seed: int | None = None,
+    notes: dict[str, dict[str, str]] | None = None,
 ) -> str:
     """Describe tables as CREATE TABLE statements, each followed by a few example rows.
 
@@ -65,6 +66,7 @@ def render_schema(
             the main database.
         shuffle_seed: If given, shuffle the table order with this seed, so extra tables are
             mixed in with the real ones instead of all coming last.
+        notes: Optional column notes ``{table: {column: note}}`` added after each table.
 
     Returns:
         Schema text for the prompt.
@@ -91,6 +93,9 @@ def render_schema(
                 rows = cur.fetchall()
                 lines = ["\t".join(cols)] + ["\t".join(_short(v) for v in r) for r in rows]
                 block += f"\n/* {len(rows)} example rows from {name}:\n" + "\n".join(lines) + "\n*/"
+            if notes and notes.get(name):
+                lines = [f"- {c}: {n}" for c, n in notes[name].items()]
+                block += f"\n/* Column notes for {name}:\n" + "\n".join(lines) + "\n*/"
             parts.append(block)
     finally:
         for con in cons.values():
