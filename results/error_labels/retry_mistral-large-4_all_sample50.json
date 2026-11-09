@@ -1,0 +1,207 @@
+{
+ "run": "retry_mistral-large-4_all",
+ "sample": "50 of 175 wrong answers, seed 0",
+ "labelled_by": "Claude (Opus 5.5), 2026-11-09; spot-check by Masoud pending",
+ "labels": {
+  "0": {
+   "category": "format_only",
+   "note": "float precision: read pre-computed % column, equal to 15 digits"
+  },
+  "6": {
+   "category": "wrong_filter",
+   "note": "grade span via Low/High Grade instead of GSserved = 'K-9'; 0 rows"
+  },
+  "25": {
+   "category": "wrong_join",
+   "note": "inner join to frpm drops schools; district type from frpm instead of DOCType"
+  },
+  "40": {
+   "category": "dirty_data",
+   "note": "CDS code stored as text with a leading zero ('04615...'); third row missing"
+  },
+  "41": {
+   "category": "wrong_column",
+   "note": "school name from frpm.`School Name` instead of schools.School (2 names differ)"
+  },
+  "46": {
+   "category": "wrong_filter_value",
+   "note": "only 'Provision 2'; data also has 'Breakfast/Lunch Provision 2'"
+  },
+  "63": {
+   "category": "dirty_data",
+   "note": "non-numeric frameVersion ('future') cast to 0 -> span 2015"
+  },
+  "66": {
+   "category": "wrong_column",
+   "note": "counted card rows instead of sets.totalSetSize"
+  },
+  "67": {
+   "category": "wrong_aggregation",
+   "note": "COUNT(*) over all printings; gold counts distinct ruling texts"
+  },
+  "86": {
+   "category": "format_only",
+   "note": "year returned as number 2015, gold as text '2015'"
+  },
+  "96": {
+   "category": "wrong_column",
+   "note": "'has a text box' via text IS NOT NULL instead of isTextless = 0"
+  },
+  "138": {
+   "category": "wrong_filter",
+   "note": "location match LIKE '%York, England%' vs exact 'York' item in list"
+  },
+  "145": {
+   "category": "wrong_column",
+   "note": "counted votes table rows instead of users.UpVotes"
+  },
+  "156": {
+   "category": "wrong_filter",
+   "note": "no Consumption > 0 condition for active months"
+  },
+  "189": {
+   "category": "wrong_aggregation",
+   "note": "counts rows, inner join to Player; gold distinct players at latest date"
+  },
+  "204": {
+   "category": "dirty_data",
+   "note": "k_symbol IS NULL only, gold also treats '' as missing; plus extra OWNER filter"
+  },
+  "211": {
+   "category": "dirty_data",
+   "note": "blank-space k_symbol counted as a purpose (gold TRIMs)"
+  },
+  "218": {
+   "category": "dirty_data",
+   "note": "inhabitants stored as text: MIN compares strings; also district id not name"
+  },
+  "231": {
+   "category": "wrong_column",
+   "note": "'opened before 1997' from loan.date instead of account.date"
+  },
+  "235": {
+   "category": "wrong_filter",
+   "note": "outgoing payments incl. non-external (account null/0)"
+  },
+  "238": {
+   "category": "wrong_aggregation",
+   "note": "average over loans (districts repeated) instead of distinct districts"
+  },
+  "271": {
+   "category": "dirty_data",
+   "note": "empty-string q3 counted as fastest time"
+  },
+  "272": {
+   "category": "wrong_filter",
+   "note": "season end = last round of the year, not the constructor's last race"
+  },
+  "284": {
+   "category": "dirty_data",
+   "note": "empty-string q3 counted as fastest time"
+  },
+  "293": {
+   "category": "wrong_aggregation",
+   "note": "COUNT(*) vs COUNT(DISTINCT driverId)"
+  },
+  "294": {
+   "category": "wrong_filter",
+   "note": "only status 'Finished', question says lapped finishers count too"
+  },
+  "329": {
+   "category": "dirty_data",
+   "note": "comma-separated items in one field not split"
+  },
+  "339": {
+   "category": "dirty_data",
+   "note": "'No Colour' placeholder treated as a real colour"
+  },
+  "342": {
+   "category": "format_only",
+   "note": "answer 'Marvel Comics by 163' in one text column instead of two columns"
+  },
+  "348": {
+   "category": "dirty_data",
+   "note": "weight 0 (= unknown) included in the average"
+  },
+  "356": {
+   "category": "dirty_data",
+   "note": "height 0 (= unknown) included in the average"
+  },
+  "358": {
+   "category": "dirty_data",
+   "note": "publisher with empty name counted"
+  },
+  "367": {
+   "category": "dirty_data",
+   "note": "height/weight 0 (= unknown) included"
+  },
+  "370": {
+   "category": "dirty_data",
+   "note": "weight 0 (= unknown) included"
+  },
+  "372": {
+   "category": "dirty_data",
+   "note": "weight 0 (= unknown) counted as under 70 kg"
+  },
+  "374": {
+   "category": "dirty_data",
+   "note": "lightest weight = 0 (= unknown) instead of smallest recorded"
+  },
+  "376": {
+   "category": "dirty_data",
+   "note": "full_name '-' placeholder treated as a known name"
+  },
+  "381": {
+   "category": "dirty_data",
+   "note": "weight 0 (= unknown) not counted as unrecorded"
+  },
+  "383": {
+   "category": "dirty_data",
+   "note": "Diagnosis = 'SLE' exact; field holds lists of diagnoses"
+  },
+  "390": {
+   "category": "wrong_filter",
+   "note": "'thrombosis registry' read as Thrombosis = 1 (the whole db is the registry)"
+  },
+  "394": {
+   "category": "wrong_column",
+   "note": "Examination.Diagnosis instead of Patient.Diagnosis"
+  },
+  "409": {
+   "category": "wrong_filter_value",
+   "note": "Thrombosis = 1, but it is graded 0-3 (gold > 0)"
+  },
+  "411": {
+   "category": "wrong_filter_value",
+   "note": "Thrombosis = 1 instead of > 0; also counts exams not patients"
+  },
+  "423": {
+   "category": "wrong_filter_value",
+   "note": "SSA negative written as '-', data stores 'negative'"
+  },
+  "428": {
+   "category": "dirty_data",
+   "note": "RNP stored as text with 'negative': MAX compares strings"
+  },
+  "430": {
+   "category": "wrong_filter",
+   "note": "'thrombosis cohort' read as Thrombosis = 1"
+  },
+  "438": {
+   "category": "ambiguous",
+   "note": "'liver enzymes stayed in normal range' read as never >= 60; gold doesn't exclude"
+  },
+  "439": {
+   "category": "wrong_filter",
+   "note": "'thrombosis cohort' read as Thrombosis = 1"
+  },
+  "454": {
+   "category": "dirty_data",
+   "note": "Diagnosis = 'SLE' exact; field holds lists of diagnoses"
+  },
+  "474": {
+   "category": "format_only",
+   "note": "two extra columns (molecule_id, bond_type); bond ids correct"
+  }
+ }
+}
