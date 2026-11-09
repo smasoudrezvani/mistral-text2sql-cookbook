@@ -40,6 +40,7 @@ from text2sql_eval.retrieval import (
 )
 from text2sql_eval.schema import render_schema, table_names
 from text2sql_eval.scorer import compare, execute_sql
+from text2sql_eval.values import ValueIndex, format_hits
 
 ROOT = Path(__file__).resolve().parents[1]
 JSONL = ROOT / "data/raw/mini_dev_sqlite.jsonl"
@@ -47,6 +48,7 @@ DB_ROOT = ROOT / "data/raw/minidev/MINIDEV/dev_databases"
 GOLD = ROOT / "data/cache/gold_results.json"
 EMB_CACHE = ROOT / "data/cache/embeddings.json"
 DISTRACT = ROOT / "data/cache/distractors"
+VALUES = ROOT / "data/cache/values"
 SLICES = ROOT / "slices"
 RAW_OUT = ROOT / "results/raw"
 SUMMARY_OUT = ROOT / "results/summary"
@@ -133,6 +135,9 @@ def summarize(raw_path: Path, approach: str, model: str, slice_name: str) -> dic
         summary["retried"] = sum(r["attempts"] > 1 for r in recs)
         summary["fixed_by_retry"] = sum(r["bird"] and not r["first_bird"] for r in recs)
         summary["broken_by_retry"] = sum(r["first_bird"] and not r["bird"] for r in recs)
+    if recs and "value_hits" in recs[0]:
+        summary["avg_value_hits"] = round(sum(len(r["value_hits"]) for r in recs) / n, 2)
+        summary["value_used"] = sum(r["value_used"] for r in recs)
     if recs and "used_distractor" in recs[0]:
         summary["used_distractor"] = sum(r["used_distractor"] for r in recs)
     if recs and "table_recall" in recs[0]:
@@ -164,6 +169,11 @@ def main() -> None:
         action="store_true",
         help="add 30 distractor tables per database (run scripts/build_distractors.py first)",
     )
+    parser.add_argument(
+        "--values",
+        action="store_true",
+        help="add matching stored values to the prompt (run scripts/build_value_index.py first)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -188,7 +198,10 @@ def main() -> None:
     neighbors: dict[str, dict[str, set[str]]] = {}
 
     RAW_OUT.mkdir(parents=True, exist_ok=True)
-    suffix = "_distract" if args.distractors else ""
+    suffix = ("_distract" if args.distractors else "") + ("_values" if args.values else "")
+    value_idx: dict[str, ValueIndex] = {}
+    if args.values:
+        value_idx = {d: ValueIndex.load(VALUES / f"{d}.json") for d in {q.db_id for q in questions}}
     raw_path = RAW_OUT / f"{args.approach}_{args.model}_{args.slice}{suffix}.jsonl"
     done: set[int] = set()
     if raw_path.exists():
@@ -247,7 +260,8 @@ def main() -> None:
                 extra_dbs=extra_dbs,
                 shuffle_seed=0 if extra_dbs and picked is None else None,
             )
-        messages = build_messages(schemas[key], q.question, q.evidence)
+        hits = value_idx[q.db_id].search(f"{q.question}\n{q.evidence}") if value_idx else []
+        messages = build_messages(schemas[key], q.question, q.evidence, format_hits(hits))
         g = gold[q.question_id]
         pace()
 
@@ -280,6 +294,10 @@ def main() -> None:
             extra["finish_reason"] = reply.finish_reason
 
         score = compare(pred, g.as_exec_result(), q.sql)
+        if value_idx:
+            low = sql.lower()
+            extra["value_hits"] = [f"{h.table}.{h.column}={h.value}" for h in hits]
+            extra["value_used"] = any(f"'{h.value.lower()}'" in low for h in hits)
         if fakes:
             extra["used_distractor"] = bool(tables_in_sql(sql, list(fakes)))
         return {

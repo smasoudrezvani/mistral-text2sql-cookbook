@@ -27,6 +27,14 @@ def test_build_messages_empty_hint():
     assert "Question: How many?" in msgs[1]["content"]
 
 
+def test_build_messages_with_values():
+    plain = build_messages("S", "Q?", "h")[1]["content"]
+    with_values = build_messages("S", "Q?", "h", values="Values ...:\n- t.`c` = 'x'")[1]["content"]
+    assert "Values" not in plain
+    assert with_values.index("Hint: h") < with_values.index("- t.`c` = 'x'")
+    assert with_values.index("- t.`c` = 'x'") < with_values.index("Question: Q?")
+
+
 def test_render_schema(tmp_path: Path):
     db = tmp_path / "s.sqlite"
     con = sqlite3.connect(db)

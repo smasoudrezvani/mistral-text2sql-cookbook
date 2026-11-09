@@ -24,19 +24,23 @@ SYSTEM_PROMPT = (
 )
 
 
-def build_messages(schema: str, question: str, evidence: str) -> list[dict[str, str]]:
+def build_messages(
+    schema: str, question: str, evidence: str, values: str = ""
+) -> list[dict[str, str]]:
     """Build chat messages for one question.
 
     Args:
         schema: Rendered schema text.
         question: Natural-language question.
         evidence: Expert hint (may be empty).
+        values: Optional value-retrieval section (see ``values.format_hits``).
 
     Returns:
         A system and a user message.
     """
     hint = evidence.strip() or "(none)"
-    user = f"Schema:\n{schema}\n\nHint: {hint}\n\nQuestion: {question}"
+    found = f"{values}\n\n" if values else ""
+    user = f"Schema:\n{schema}\n\nHint: {hint}\n\n{found}Question: {question}"
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
 
 
