@@ -1,0 +1,19 @@
+{
+ "run": "retry_mistral-small-2603_all_notes",
+ "approach": "retry",
+ "model": "mistral-small-2603",
+ "slice": "all",
+ "n": 500,
+ "ex_bird": 0.328,
+ "ex_strict": 0.312,
+ "failed_to_run": 18,
+ "prompt_tokens": 3045126,
+ "completion_tokens": 103321,
+ "cost_usd": 0.5188,
+ "first_try_ex_bird": 0.3,
+ "first_try_failed_to_run": 57,
+ "avg_attempts": 1.26,
+ "retried": 83,
+ "fixed_by_retry": 14,
+ "broken_by_retry": 0
+}
