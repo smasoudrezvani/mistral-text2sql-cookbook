@@ -111,3 +111,11 @@ same pipeline, only the metadata changes:
 on with a flag, on the same questions as before (Ministral and Small on 500, Large on the
 200-question slice). Either result is useful for the notebook: a gain shows the fix, and no gain
 shows that the hints already carry most of this information, which is what the AT&T table hints at.
+
+## Update: what we measured (2026-11-09)
+
+We ran the recommended experiment. With BIRD's hints already in the prompt, adding column notes
+(BIRD descriptions + an automatic data-trap profile) to approach (a) gave **+5.8 points
+(Ministral 8B), +12.2 (Small 4) and +10.5 (Large 4, 200 questions)**, all statistically clear
+(McNemar p <= 0.01). This is much more than the +1 to +3 points we expected from the literature,
+which never reported the "no descriptions, with hints" baseline. See `results/summary/*_notes.json`.
