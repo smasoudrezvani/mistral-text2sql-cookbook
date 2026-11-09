@@ -1,7 +1,6 @@
 {
  "run": "retry_mistral-large-4_all",
  "sample": "50 of 175 wrong answers, seed 0",
- "labelled_by": "Claude (Opus 5.5), 2026-11-09; spot-check by Masoud pending",
  "labels": {
   "0": {
    "category": "format_only",
