@@ -92,12 +92,14 @@ class Completion:
         prompt_tokens: Input tokens billed.
         completion_tokens: Output tokens billed.
         finish_reason: Why generation stopped (``"length"`` = hit max_tokens).
+        texts: All sampled replies when ``n > 1`` (``text`` is the first one).
     """
 
     text: str
     prompt_tokens: int
     completion_tokens: int
     finish_reason: str = "stop"
+    texts: tuple[str, ...] = ()
 
 
 def chat(
@@ -107,6 +109,7 @@ def chat(
     temperature: float = 0.0,
     max_tokens: int = 16384,  # Large 4 sometimes reasons past 8k tokens before answering
     retries: int = 6,
+    n: int = 1,
 ) -> Completion:
     """Call Mistral chat completion with retry on transient errors.
 
@@ -120,9 +123,10 @@ def chat(
         temperature: Sampling temperature (0 for repeatable runs).
         max_tokens: Cap on output tokens.
         retries: Attempts before giving up.
+        n: Number of replies to sample in one request (the prompt is billed once).
 
     Returns:
-        The reply text and token counts.
+        The reply text(s) and token counts.
 
     Raises:
         RuntimeError: If every attempt failed.
@@ -136,17 +140,20 @@ def chat(
                 temperature=temperature,
                 top_p=1.0,  # some models (Large 4) require top_p=1 with temperature 0
                 max_tokens=max_tokens,
+                **({"n": n} if n > 1 else {}),
             )
             usage = resp.usage
             choice = resp.choices[0]
             finish = str(getattr(choice, "finish_reason", None) or "stop")
             if finish == "length":
                 logger.warning("reply hit max_tokens=%d before finishing", max_tokens)
+            texts = tuple(content_text(ch.message.content) for ch in resp.choices)
             return Completion(
-                text=content_text(choice.message.content),
+                text=texts[0],
                 prompt_tokens=usage.prompt_tokens or 0,
                 completion_tokens=usage.completion_tokens or 0,
                 finish_reason=finish,
+                texts=texts,
             )
         except Exception as e:  # SDK raises several error types; retry transient ones
             status = getattr(e, "status_code", None)

@@ -4,6 +4,7 @@ Approaches:
     full_schema  (a) all tables + 3 example rows in the prompt
     retrieval    (b) only the top-k tables by embedding similarity, plus FK-linked tables
     retry        (c) full schema, then run the SQL and retry with the error / empty-result feedback
+    vote         full schema, sample N answers (temperature > 0), keep the most common result
 
 Resumable: per-question results are appended to results/raw/<approach>_<model>_<slice>.jsonl
 and questions already in that file are skipped. The summary is rebuilt from the whole file.
@@ -39,8 +40,9 @@ from text2sql_eval.retrieval import (
     tables_in_sql,
 )
 from text2sql_eval.schema import render_schema, table_names
-from text2sql_eval.scorer import compare, execute_sql
+from text2sql_eval.scorer import ExecResult, compare, execute_sql
 from text2sql_eval.values import ValueIndex, format_hits
+from text2sql_eval.voting import majority_vote
 
 ROOT = Path(__file__).resolve().parents[1]
 JSONL = ROOT / "data/raw/mini_dev_sqlite.jsonl"
@@ -135,6 +137,11 @@ def summarize(raw_path: Path, approach: str, model: str, slice_name: str) -> dic
         summary["retried"] = sum(r["attempts"] > 1 for r in recs)
         summary["fixed_by_retry"] = sum(r["bird"] and not r["first_bird"] for r in recs)
         summary["broken_by_retry"] = sum(r["first_bird"] and not r["bird"] for r in recs)
+    if recs and "sample_bird" in recs[0]:
+        summary["first_sample_ex_bird"] = round(sum(r["first_bird"] for r in recs) / n, 4)
+        summary["any_of_samples_ex_bird"] = round(sum(r["any_bird"] for r in recs) / n, 4)
+        summary["avg_distinct_results"] = round(sum(r["n_groups"] for r in recs) / n, 2)
+        summary["no_sample_ran"] = sum(r["n_ok"] == 0 for r in recs)
     if recs and "value_hits" in recs[0]:
         summary["avg_value_hits"] = round(sum(len(r["value_hits"]) for r in recs) / n, 2)
         summary["value_used"] = sum(r["value_used"] for r in recs)
@@ -154,9 +161,15 @@ def summarize(raw_path: Path, approach: str, model: str, slice_name: str) -> dic
 def main() -> None:
     """Run an approach on a slice, append per-question results, write a summary."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--approach", required=True, choices=["full_schema", "retrieval", "retry"])
+    parser.add_argument(
+        "--approach", required=True, choices=["full_schema", "retrieval", "retry", "vote"]
+    )
     parser.add_argument(
         "--max-attempts", type=int, default=3, help="model calls per question (retry)"
+    )
+    parser.add_argument("--samples", type=int, default=5, help="answers per question (vote)")
+    parser.add_argument(
+        "--temperature", type=float, default=0.7, help="sampling temperature (vote)"
     )
     parser.add_argument("--model", required=True, choices=sorted(PRICES))
     parser.add_argument("--slice", default="dev50", help="'all' or a file name in slices/")
@@ -286,6 +299,29 @@ def main() -> None:
                 "first_bird": first.bird,
                 "first_strict": first.strict,
             }
+        elif args.approach == "vote":
+            reply = chat(client, args.model, messages, temperature=args.temperature, n=args.samples)
+            sqls = [extract_sql(x) for x in reply.texts]
+            runs = [
+                execute_sql(db, s, timeout_s=g.pred_timeout_s, attach=extra_dbs)
+                if s
+                else ExecResult(rows=None, error="no SQL found in the reply")
+                for s in sqls
+            ]
+            vote = majority_vote(runs)
+            sql, pred = sqls[vote.winner], runs[vote.winner]
+            tok_in, tok_out = reply.prompt_tokens, reply.completion_tokens
+            sample_bird = [compare(r, g.as_exec_result(), q.sql).bird for r in runs]
+            extra.update(
+                {
+                    "votes": vote.votes,
+                    "n_ok": vote.n_ok,
+                    "n_groups": vote.n_groups,
+                    "sample_bird": sample_bird,
+                    "first_bird": sample_bird[0],
+                    "any_bird": any(sample_bird),
+                }
+            )
         else:
             reply = chat(client, args.model, messages)
             sql = extract_sql(reply.text)
