@@ -60,7 +60,7 @@ SELECT ROUND(AVG(CASE WHEN s.weight_kg > 0 THEN s.weight_kg END), 2) AS average_
 
 **Hint:** An inpatient is a patient who was admitted to the hospital; an outpatient is a patient who was followed at the outpatient clinic.
 
-**What went wrong:** "Patients in the thrombosis registry" means everyone in this database. The model read it as "patients who had thrombosis" and added a filter, so the answer became 100%.
+**What went wrong:** "Patients in the thrombosis registry" means everyone in this database (it is a thrombosis registry; the database is even called `thrombosis_prediction`). The model saw the word "thrombosis", saw a `Thrombosis` column, and connected them: it added `AND e.Thrombosis = 1`, so it only counted patients who actually had thrombosis and the answer became 100% instead of 35.9%. Language models tend to use every important word of the question somewhere in the SQL, even words that only describe the database. The same mistake happened 3 times in the 50 labelled failures (q390, q430, q439), always with "thrombosis registry/cohort". A possible fix is a prompt rule: words that describe the database or the whole cohort are not filters.
 
 **Model's SQL:**
 ```sql
@@ -313,7 +313,7 @@ SELECT ROUND(SUM(COALESCE(sat.NumTstTakr, 0)) * 1.0 / COUNT(*), 2) AS avg_sat_te
 
 **Hint:** GPT stands for glutamic pyruvic transaminase, a liver enzyme; anti-ribonuclear protein is an autoantibody measured in laboratory tests.
 
-**What went wrong:** "Whose liver enzymes stayed in the normal range" can mean "never above normal" (the model's reading) or just "use their normal-range tests" (the gold's reading).
+**What went wrong:** The question says "the three whose liver enzymes **stayed** in the normal range" and then "take their highest GPT value **among their laboratory tests that fall in the normal range**". This can be read in two ways. **Reading A** (the model's, and most people's): "stayed in the normal range" means the GPT was *never* 60 or above, so any patient with an abnormal test is excluded. **Reading B** (the gold's): nobody is excluded; just ignore the abnormal tests and rank patients by their highest normal one. The table below shows why the answers differ: the gold's top patient had 30 abnormal GPT tests (up to 227), which hardly "stayed in the normal range". So the question is ambiguous, and the gold is arguably questionable.
 
 **Model's SQL:**
 ```sql
@@ -361,11 +361,24 @@ SELECT T1.Birthday FROM Patient AS T1 INNER JOIN Laboratory AS T2 ON T1.ID = T2.
 1963-12-13
 ```
 
+**The two readings, with the real data** (patients with RNP >= 16, ranked by their highest *normal* GPT test; generated from the database):
+
+| Patient | Birthday | Highest normal GPT | Highest GPT ever | Abnormal GPT tests | Reading A keeps? |
+|---|---|---|---|---|---|
+| 5186147 | 1949-05-11 | 59 | 227 | 30 | no |
+| 2320830 | 1958-10-23 | 57 | 57 | 0 | yes |
+| 5184284 | 1963-12-13 | 57 | 80 | 3 | no |
+| 5122312 | 1969-11-30 | 56 | 56 | 0 | yes |
+| 1650222 | 1947-03-17 | 44 | 93 | 1 | no |
+| 912147 | 1975-02-17 | 42 | 219 | 5 | no |
+
+Reading B (gold) takes the first three rows. Reading A (model) skips every patient with an abnormal test, so it takes 1958-10-23, 1969-11-30 and the next patient with none.
+
 ## How to fix each kind of error
 
 | Error | Fix | How |
 |---|---|---|
-| Dirty data (21/50) | **Add BIRD's column descriptions to the schema** | BIRD's description CSVs already say e.g. *"If the weight_kg is NULL or 0, it means the weight of the superhero is missing"* and *"Thrombosis: 0 = negative, 1-3 = degree"*. Today the prompt only has CREATE TABLE + 3 example rows. |
+| Dirty data (21/50) | **Add BIRD's column descriptions to the schema** | BIRD's description CSVs already say e.g. *"If the weight_kg is NULL or 0, it means the weight of the superhero is missing"* and *"Thrombosis: 0 = negative, 1-3 = degree"*. The plain prompt only had CREATE TABLE + 3 example rows. |
 | Dirty data | **Data profile per column** (automatic, no LLM) | For each column compute: share of NULL / 0 / '' / '-', numbers stored as text, values that look like lists ("a, b"). Add one short note per risky column, e.g. `weight_kg: 31% are 0 (likely missing)`. |
 | Dirty data | **System-prompt rules** | "Treat 0, '' and '-' in measurement columns as missing unless the question says otherwise. CAST text numbers before MIN/MAX/comparisons. Fields may hold comma-separated lists." |
 | Wrong filter (misread) | **System-prompt rule + self-check** | "The database itself is the cohort/registry; don't add filters the question doesn't ask for." Ask the model to list each condition it used and point to the words in the question that require it. |
@@ -376,5 +389,17 @@ SELECT T1.Birthday FROM Patient AS T1 INNER JOIN Laboratory AS T2 ON T1.ID = T2.
 | Wrong join | **System-prompt rule** | "Use LEFT JOIN when the question says to include all rows (with zeros)." |
 | Ambiguous | Not fixable by prompting | Report it; ideally the question should be clarified. |
 
-The first three rows target 21 of the 50 labelled errors and need no extra model call, so they
-are the best first experiment.
+**We tested the first two rows together as "column notes"** (BIRD descriptions + an automatic
+data profile, `--notes` in `scripts/run_eval.py`), with BIRD's hints still in the prompt:
+
+| Model | Plain prompt | + column notes |
+|---|---|---|
+| Ministral 3 8B (500 questions) | 10.6% | 16.4% |
+| Mistral Small 4 (500 questions) | 18.6% | 30.8% |
+| Mistral Large 4 (200-question subset) | 61.5% | 72.0% |
+
+All three gains are statistically significant (paired McNemar test, p <= 0.01). The prompt rules
+for misread filters and aggregations were not tested.
+
+To inspect any question yourself (free, no API calls):
+`uv run python scripts/show_case.py <question_id>`

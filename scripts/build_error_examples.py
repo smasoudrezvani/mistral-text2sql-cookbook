@@ -36,8 +36,15 @@ EXAMPLES = [
         "wrong_filter",
         "Wrong filter (misread question)",
         390,
-        '"Patients in the thrombosis registry" means everyone in this database. The model read it '
-        'as "patients who had thrombosis" and added a filter, so the answer became 100%.',
+        '"Patients in the thrombosis registry" means everyone in this database (it is a thrombosis '
+        "registry; the database is even called `thrombosis_prediction`). The model saw the word "
+        '"thrombosis", saw a `Thrombosis` column, and connected them: it added '
+        "`AND e.Thrombosis = 1`, so it only counted patients who actually had thrombosis and the "
+        "answer became 100% instead of 35.9%. Language models tend to use every important word of "
+        "the question somewhere in the SQL, even words that only describe the database. The same "
+        "mistake happened 3 times in the 50 labelled failures (q390, q430, q439), always with "
+        '"thrombosis registry/cohort". A possible fix is a prompt rule: words that describe the '
+        "database or the whole cohort are not filters.",
     ),
     (
         "wrong_column",
@@ -78,8 +85,15 @@ EXAMPLES = [
         "ambiguous",
         "Ambiguous question",
         438,
-        '"Whose liver enzymes stayed in the normal range" can mean "never above normal" (the '
-        "model's reading) or just \"use their normal-range tests\" (the gold's reading).",
+        'The question says "the three whose liver enzymes **stayed** in the normal range" and then '
+        '"take their highest GPT value **among their laboratory tests that fall in the normal '
+        "range**\". This can be read in two ways. **Reading A** (the model's, and most people's): "
+        '"stayed in the normal range" means the GPT was *never* 60 or above, so any patient with an '
+        "abnormal test is excluded. **Reading B** (the gold's): nobody is excluded; just ignore the "
+        "abnormal tests and rank patients by their highest normal one. The table below shows why the "
+        "answers differ: the gold's top patient had 30 abnormal GPT tests (up to 227), which hardly "
+        '"stayed in the normal range". So the question is ambiguous, and the gold is arguably '
+        "questionable.",
     ),
 ]
 
@@ -88,7 +102,7 @@ SOLUTIONS = """\
 
 | Error | Fix | How |
 |---|---|---|
-| Dirty data (21/50) | **Add BIRD's column descriptions to the schema** | BIRD's description CSVs already say e.g. *"If the weight_kg is NULL or 0, it means the weight of the superhero is missing"* and *"Thrombosis: 0 = negative, 1-3 = degree"*. Today the prompt only has CREATE TABLE + 3 example rows. |
+| Dirty data (21/50) | **Add BIRD's column descriptions to the schema** | BIRD's description CSVs already say e.g. *"If the weight_kg is NULL or 0, it means the weight of the superhero is missing"* and *"Thrombosis: 0 = negative, 1-3 = degree"*. The plain prompt only had CREATE TABLE + 3 example rows. |
 | Dirty data | **Data profile per column** (automatic, no LLM) | For each column compute: share of NULL / 0 / '' / '-', numbers stored as text, values that look like lists ("a, b"). Add one short note per risky column, e.g. `weight_kg: 31% are 0 (likely missing)`. |
 | Dirty data | **System-prompt rules** | "Treat 0, '' and '-' in measurement columns as missing unless the question says otherwise. CAST text numbers before MIN/MAX/comparisons. Fields may hold comma-separated lists." |
 | Wrong filter (misread) | **System-prompt rule + self-check** | "The database itself is the cohort/registry; don't add filters the question doesn't ask for." Ask the model to list each condition it used and point to the words in the question that require it. |
@@ -99,9 +113,54 @@ SOLUTIONS = """\
 | Wrong join | **System-prompt rule** | "Use LEFT JOIN when the question says to include all rows (with zeros)." |
 | Ambiguous | Not fixable by prompting | Report it; ideally the question should be clarified. |
 
-The first three rows target 21 of the 50 labelled errors and need no extra model call, so they
-are the best first experiment.
+**We tested the first two rows together as "column notes"** (BIRD descriptions + an automatic
+data profile, `--notes` in `scripts/run_eval.py`), with BIRD's hints still in the prompt:
+
+| Model | Plain prompt | + column notes |
+|---|---|---|
+| Ministral 3 8B (500 questions) | 10.6% | 16.4% |
+| Mistral Small 4 (500 questions) | 18.6% | 30.8% |
+| Mistral Large 4 (200-question subset) | 61.5% | 72.0% |
+
+All three gains are statistically significant (paired McNemar test, p <= 0.01). The prompt rules
+for misread filters and aggregations were not tested.
+
+To inspect any question yourself (free, no API calls):
+`uv run python scripts/show_case.py <question_id>`
 """
+
+
+Q438_TABLE_SQL = """
+SELECT p.ID, p.Birthday,
+       MAX(CASE WHEN l.GPT < 60 THEN l.GPT END) AS highest_normal_gpt,
+       MAX(l.GPT) AS highest_gpt_ever,
+       SUM(l.GPT >= 60) AS abnormal_gpt_tests
+FROM Patient p JOIN Laboratory l ON l.ID = p.ID
+WHERE p.ID IN (SELECT ID FROM Laboratory WHERE CAST(RNP AS REAL) >= 16)
+GROUP BY p.ID
+HAVING highest_normal_gpt IS NOT NULL
+ORDER BY highest_normal_gpt DESC, p.ID
+LIMIT 6
+"""
+
+
+def q438_table(db: Path) -> str:
+    """Markdown table showing the two readings of q438, computed from the database."""
+    rows = execute_sql(db, Q438_TABLE_SQL).rows or []
+    lines = [
+        "**The two readings, with the real data** (patients with RNP >= 16, ranked by their highest "
+        "*normal* GPT test; generated from the database):\n",
+        "| Patient | Birthday | Highest normal GPT | Highest GPT ever | Abnormal GPT tests | Reading A keeps? |",
+        "|---|---|---|---|---|---|",
+    ]
+    for pid, bday, normal, ever, abnormal in rows:
+        keep = "yes" if abnormal == 0 else "no"
+        lines.append(f"| {pid} | {bday} | {normal} | {ever} | {abnormal} | {keep} |")
+    lines.append(
+        "\nReading B (gold) takes the first three rows. Reading A (model) skips every patient with "
+        "an abnormal test, so it takes 1958-10-23, 1969-11-30 and the next patient with none.\n"
+    )
+    return "\n".join(lines)
 
 
 def _rows(rows: list[tuple[object, ...]] | None, k: int = 5) -> str:
@@ -148,6 +207,8 @@ def main() -> None:
             "**Gold SQL:**\n```sql\n" + q.sql.strip() + "\n```\n",
             "**Gold answer:**\n```\n" + _rows(gold[qid].rows) + "\n```\n",
         ]
+        if qid == 438:
+            parts.append(q438_table(db_path(DB_ROOT, q.db_id)))
     parts.append(SOLUTIONS)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text("\n".join(parts), encoding="utf-8")
