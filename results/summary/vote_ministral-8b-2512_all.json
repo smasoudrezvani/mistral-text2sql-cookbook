@@ -1,0 +1,17 @@
+{
+ "run": "vote_ministral-8b-2512_all",
+ "approach": "vote",
+ "model": "ministral-8b-2512",
+ "slice": "all",
+ "n": 500,
+ "ex_bird": 0.106,
+ "ex_strict": 0.1,
+ "failed_to_run": 44,
+ "prompt_tokens": 1215397,
+ "completion_tokens": 353007,
+ "cost_usd": 0.2353,
+ "first_sample_ex_bird": 0.092,
+ "any_of_samples_ex_bird": 0.2,
+ "avg_distinct_results": 1.72,
+ "no_sample_ran": 44
+}

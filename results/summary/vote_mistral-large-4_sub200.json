@@ -1,0 +1,18 @@
+{
+ "run": "vote_mistral-large-4_sub200",
+ "approach": "vote",
+ "model": "mistral-large-4",
+ "slice": "sub200",
+ "n": 31,
+ "ex_bird": 0.5161,
+ "ex_strict": 0.4194,
+ "failed_to_run": 0,
+ "prompt_tokens": 89871,
+ "completion_tokens": 743524,
+ "cost_usd": 1.6243,
+ "first_sample_ex_bird": 0.5161,
+ "any_of_samples_ex_bird": 0.5806,
+ "avg_distinct_results": 1.39,
+ "no_sample_ran": 0,
+ "note": "partial: stopped after 31 questions for budget (2026-11-09)"
+}

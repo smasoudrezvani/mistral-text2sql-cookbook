@@ -1,0 +1,15 @@
+{
+ "run": "full_schema_ministral-8b-2512_all_values",
+ "approach": "full_schema",
+ "model": "ministral-8b-2512",
+ "slice": "all",
+ "n": 500,
+ "ex_bird": 0.102,
+ "ex_strict": 0.096,
+ "failed_to_run": 115,
+ "prompt_tokens": 1276626,
+ "completion_tokens": 72616,
+ "cost_usd": 0.2024,
+ "avg_value_hits": 7.86,
+ "value_used": 301
+}

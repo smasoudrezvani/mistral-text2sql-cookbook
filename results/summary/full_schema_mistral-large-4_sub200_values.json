@@ -1,0 +1,15 @@
+{
+ "run": "full_schema_mistral-large-4_sub200_values",
+ "approach": "full_schema",
+ "model": "mistral-large-4",
+ "slice": "sub200",
+ "n": 200,
+ "ex_bird": 0.605,
+ "ex_strict": 0.57,
+ "failed_to_run": 3,
+ "prompt_tokens": 465717,
+ "completion_tokens": 787779,
+ "cost_usd": 1.9803,
+ "avg_value_hits": 8.01,
+ "value_used": 108
+}

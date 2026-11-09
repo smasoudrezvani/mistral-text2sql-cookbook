@@ -1,0 +1,17 @@
+{
+ "run": "vote_mistral-small-2603_all",
+ "approach": "vote",
+ "model": "mistral-small-2603",
+ "slice": "all",
+ "n": 500,
+ "ex_bird": 0.21,
+ "ex_strict": 0.204,
+ "failed_to_run": 4,
+ "prompt_tokens": 1221397,
+ "completion_tokens": 365436,
+ "cost_usd": 0.4025,
+ "first_sample_ex_bird": 0.176,
+ "any_of_samples_ex_bird": 0.33,
+ "avg_distinct_results": 2.14,
+ "no_sample_ran": 4
+}
